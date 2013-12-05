@@ -17,7 +17,7 @@ without you having to write any custom code.
 
 - Clients **subscribe** to record sets by name
 ```js
-Meteor.subscribe("top-scores", "scrabble");
+Meteor.subscribe("top-scores", "dominion");
 ```
 - The server runs its **publish function**, which typically returns a cursor
 ```js
@@ -165,60 +165,118 @@ while, and horizontal scaling still breaks "immediacy".
 
 @@@
 
-### example of reacting to oplog
+## Oplog tailing, conceptually
+
+```
+Scores.find({game: "carrom"}, {sort: {score: -1}, limit: 3, fields: {score: 1, user: 1}})
+```
+Run the query and get
+```
+{_id: "xxx", user: "avital", score: 150}
+{_id: "yyy", user: "naomi", score: 140}
+{_id: "zzz", user: "slava", score: 130}
+```
+Tailing the oplog, we see (abstractly):
+```
+{op: "insert", id: "www", {game: "skee-ball", user: "glasser", score: 1000}}
+   # ignore it: does not match query
+{op: "update", id: "xxx", {$set: {user: "avi"}}}
+   # invoke changed("xxx", {user: "avi"})
+{op: "insert", id: "aaa", {game: "carrom", user: "glasser", score: 10}}
+   # ignore it: query matches but it sorts below our limit
+```
 
 @@@
 
-### but we do need to understand mongo.  fortunately we have minimongo
+## Oplog tailing, conceptually
+
+```
+Scores.find({game: "carrom"}, {sort: {score: -1}, limit: 3, fields: {score: 1, user: 1}})
+```
+Our state now is:
+```
+{_id: "xxx", user: "avi", score: 150}
+{_id: "yyy", user: "naomi", score: 140}
+{_id: "zzz", user: "slava", score: 130}
+```
+More oplog entries:
+```
+{op: "remove", id: "ppp"}
+   # ignore it: removing something we aren't publishing can't affect us
+   #   (unless skip option is set!)
+{op: "insert", id: "bbb", {user: "glasser", score 200}}
+   # matches and sorts at the top!
+   # invoke added("bbb", {user: "glasser", score 200})
+   #    and removed("zzz")
+```
 
 @@@
 
-### on devel now, with restrictions
+## Oplog tailing, conceptually
 
-basically we're writing a query planner
-
-@@@
-
-### you'll be able to use it in next week's release
-
-in meteor run.  you can run it in production with an url.  galaxy supports it !
-
-@@@
-
-### benchmarks
-
-@@@
-
-### near future: support more queries
-
-@@@
-
-### deeper future: in-mongo?
-
-@@@
-
-### any qs
-
-
-
-big pro: we don't need deep understanding of selectors, field projections, sort
-specifiers, options, etc: that's what mongo is for.
+```
+Scores.find({game: "carrom"}, {sort: {score: -1}, limit: 3, fields: {score: 1, user: 1}})
+```
+Our state now is:
+```
+{_id: "bbb", user: "glasser", score: 200}
+{_id: "xxx", user: "avi", score: 150}
+{_id: "yyy", user: "naomi", score: 140}
+```
+More oplog entries:
+```
+{op: "update", id: "ccc", {$set: {color: "blue"}}
+   # this is a document not currently in the cursor. this change
+   # does not affect the selector or the sort criteria, so it can't
+   # affect us.
+{op: "update", id: "ddd", {$set: {game: "dominion"}}
+   # this is a document not currently in the cursor. this change
+   # is to a field from the selector, but it can't make it true.
+{op: "update", id: "eee", {$set: {score: 500}}
+   # does this match? only if "eee" has game="carrom"
+   # we have to fetch doc "eee" from Mongo and check.
+   # if it does, invoke added("eee", {user: "emily", score: 500})
+   #                and removed("yyy")
+```
 
 @@@
 
-special nod to arunoda who explored this, we've copmared design notes etc
+## Understanding Mongo
 
-## How is that useful
+- In order to process the oplog, we need to be able to interpret Mongo
+  selectors, field specifiers, sort specifiers, etc
+- This was not the case for poll-and-diff
+- Fortunately, Meteor already can do this: minimongo, our client-side local
+  database cache!
+- When moving minimongo to the server, we need to be very careful that we
+  perfectly match Mongo's implementation, even in complex cases (nested arrays,
+  nulls, etc)
+- Synchronizing between the "initial query" and the oplog tailing is very subtle
 
-we already wrote a mongo query engine
+@@@
 
-- We already have a decent implementation of Mongo query logic: our client-side
-  **minimongo** library
-- So we can **interpret queries in Meteor** and use the oplog to keep the
-  results up to date!
+### Oplog Tailing: On `devel` now!
 
+- Aiming for release this month
+- Current implementation is very conservative: only equality queries, no
+  sort/limit support
+- Plan to increase the supported cursors over time as we ensure that the
+  implementation is 100% correct
+- Before 1.0, will support all of the most common queries
+- Query planner for live queries
+- Current implementation runs automatically for dev-mode `meteor run` and can be
+  enabled in production with `$MONGO_OPLOG_URL`
+- Works with Galaxy!
 
+Note:
+Mention Arunoda.
 
-i'm conservative.  we don't fuck around.
+@@@
 
-no spec.
+### Benchmarks XXX
+
+@@@
+
+### Thank you
+
+Any questions?
