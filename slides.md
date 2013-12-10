@@ -236,6 +236,29 @@ This is a document not currently in the cursor. This change
 does not affect the selector or the sort criteria, so it can't
 affect the results. Ignore it!
 
+@@@
+
+## Oplog tailing, conceptually
+
+```javascript
+Scores.find({game: "carrom"}, {sort: {score: -1}, limit: 3, fields: {score: 1, user: 1}})
+```
+Cache is:
+```javascript
+{_id: "xxx", user: "avital", score: 150}
+{_id: "yyy", user: "naomi", score: 140}
+{_id: "zzz", user: "slava", score: 130}
+```
+Oplog says:
+
+
+```javascript
+{op: "update", id: "xxx", {$set: {color: "red"}}}
+```
+
+This is a document in the cursor, but it does not affect the selector, sort
+criteria, or any published fields. Ignore it!
+
 
 @@@
 
